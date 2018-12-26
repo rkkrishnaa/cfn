@@ -92,6 +92,16 @@ Resources:
       Tags:
         - Key: Name
           Value: !Ref 'VPCName'
+  TestVPC:
+    Type: AWS::EC2::VPC
+    Properties: 
+      CidrBlock: !Ref VPCCidrBlock
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: 'TestVPCName'
           
   PublicSubnet1:
     Type: AWS::EC2::Subnet
@@ -311,13 +321,6 @@ Resources:
         FromPort: 0
         ToPort: 65535
         Description: Open to an external network
-  
-  TestBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      AccessControl: BucketOwnerFullControl
-      VersioningConfiguration:
-        Status: Enabled
   
   EC2Instance:
     Type: AWS::EC2::Instance
