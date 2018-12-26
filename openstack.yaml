@@ -312,6 +312,13 @@ Resources:
         ToPort: 65535
         Description: Open to an external network
   
+  TestBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: BucketOwnerFullControl
+      VersioningConfiguration:
+        Status: Enabled
+  
   EC2Instance:
     Type: AWS::EC2::Instance
     Properties:
