@@ -22,7 +22,7 @@ Parameters:
   PublicSubnet1AvailabilityZone:
     Description: Availability Zone of the public subnet 1
     Type: String
-    Default: ap-southeast-1a
+    Default: us-east-1a
   
   PublicSubnet2CidrBlock:
     Description: CIDR block of the public subnet 2
@@ -32,7 +32,7 @@ Parameters:
   PublicSubnet2AvailabilityZone:
     Description: Availability Zone of the public subnet 2
     Type: String
-    Default: ap-southeast-1b
+    Default: us-east-1b
   
   PrivateSubnet1CidrBlock:
     Description: CIDR block of the private subnet 1 
@@ -42,7 +42,7 @@ Parameters:
   PrivateSubnet1AvailabilityZone:
     Description: Availability Zone of the private subnet 1
     Type: String
-    Default: ap-southeast-1a
+    Default: us-east-1a
   
   PrivateSubnet2CidrBlock:
     Description: CIDR block of the private subnet 2
@@ -52,17 +52,18 @@ Parameters:
   PrivateSubnet2AvailabilityZone:
     Description: Availability Zone of the private subnet 2
     Type: String
-    Default: ap-southeast-1b
+    Default: us-east-1b
   
   KeyName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
     Type: AWS::EC2::KeyPair::KeyName
+    Default: key
     ConstraintDescription: must be the name of an existing EC2 KeyPair.
   
   InstanceType:
     Description: EC2 instance type
     Type: String
-    Default: t2.micro
+    Default: t2.medium
     AllowedValues: [t1.micro, t2.nano, t2.micro, t2.small, t2.medium, t2.large, t2.xlarge, m3.medium, m4.large, m4.xlarge, m4.2xlarge]
     ConstraintDescription: Enter a vaild EC2 instance type.
   
@@ -78,7 +79,7 @@ Parameters:
   AMIId:
     Description: Image Id
     Type: String
-    Default: ami-03221428e6676db69
+    Default: ami-0f9cf087c1f27d9b1
    
 Resources:
   VPC:
@@ -335,10 +336,8 @@ Resources:
             "\n",
             [
               "#!/bin/bash",
-              "curl https://s3.amazonaws.com/gpscripts/update_package.sh -o /tmp/update_package.sh",
-              "chmod +x /tmp/update_package.sh",
-              "sudo bash /tmp/update_package.sh",
-              "apt install git -y",
+              "sudo apt update"   
+              "sudo apt install git -y",
               "git clone https://github.com/rkkrishnaa/openstack-ocata.git",
               "cd openstack-ocata",
               "bash installer.sh"
