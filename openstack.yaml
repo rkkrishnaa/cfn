@@ -103,6 +103,17 @@ Resources:
         - Key: Name
           Value: 'TestVPCName'
           
+  TestVPC1:
+    Type: AWS::EC2::VPC
+    Properties: 
+      CidrBlock: !Ref VPCCidrBlock
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: 'TestVPCName'
+          
   PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
