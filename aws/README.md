@@ -1,3 +1,3 @@
 Architecture Diagram
 ---------------------
-![three-tier-arch](aws/elasticbeanstack-app/cfn_aws_arch.png?raw=true)
+![cfn_aws_arch.png](elasticbeanstack-app/cfn_aws_arch.png?raw=true)
