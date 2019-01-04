@@ -1,0 +1,134 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Deployment pipeline for cloudformation projects
+
+Parameters:
+  GithubRepoName:
+    Type: String
+    Description: The Github repository where the cloudformation templates are located
+  GithubRepoBranch:
+    Type: String
+    Description: The Git branch/tag to be used for deployment
+    Default: master
+  GithubRepoOwner:
+    Type: String
+    Description: The owner of the Github repository
+  GithubOauthToken:
+    Type: String
+    Description: Valid Oauth Token generated from the Github account
+  TemplateFileName:
+    Type: String
+    Default: openstack.yaml
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Source Code Repository
+        Parameters:
+          - GithubRepoName
+          - GithubRepoBranch
+          - GithubRepoOwner
+          - GithubOauthToken
+          - TemplateFileName
+
+Resources:
+  ArtifactStoreBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: BucketOwnerFullControl
+      VersioningConfiguration:
+        Status: Enabled
+
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: codepipeline.amazonaws.com
+          Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  CfnRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [cloudformation.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: CloudFormationRole
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - 'ec2:*'
+                Effect: Allow
+                Resource: '*'
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn: !GetAtt PipelineRole.Arn
+      ArtifactStore:
+        Location: !Ref ArtifactStoreBucket
+        Type: S3
+      Stages:
+        - Name: Source
+          Actions:
+            - InputArtifacts: []
+              Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              OutputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                Repo: !Ref GithubRepoName
+                Branch: !Ref GithubRepoBranch
+                Owner: !Ref GithubRepoOwner
+                OAuthToken: !Ref GithubOauthToken
+              RunOrder: 1
+        - Name: Deploy
+          Actions:
+          - Name: Deploy
+            ActionTypeId:
+              Category: Deploy
+              Owner: AWS
+              Version: 1
+              Provider: CloudFormation
+            InputArtifacts:
+              - Name: SourceOutput
+            Configuration:
+              ActionMode: CREATE_UPDATE
+              Capabilities: CAPABILITY_IAM
+              StackName: MyApplicationStack
+              RoleArn: !GetAtt [CfnRole, Arn]
+              TemplatePath: !Sub "SourceOutput::${TemplateFileName}"
+            RunOrder: 1
+
+#  WebHook:
+#    Type: "AWS::CodePipeline::Webhook"
+#    Properties:
+#      AuthenticationConfiguration:
+#        WebhookAuthConfiguration
+#          SecretToken: secret
+#      Filters:
+#        - JsonPath: "$.ref"
+#          MatchEquals: refs/heads/{Branch}
+#      Authentication: GITHUB_HMAC
+#      TargetPipeline: !Ref Pipeline
+#      TargetAction: Source
+#      TargetPipelineVersion: !GetAtt Pipeline.Version
+#      RegisterWithThirdParty: 'true'

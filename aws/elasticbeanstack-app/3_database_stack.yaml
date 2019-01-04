@@ -1,0 +1,170 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'Cloudformation template to create a postgres RDS infrastructure with multi availability zone deployment for hosting an application in elasticbeanstack.'
+
+Parameters:
+  ParentNetworkStack:
+    Description: Name of the parent network stack
+    Type: String
+    MinLength: 1
+    MaxLength: 255
+    AllowedPattern: "^[a-zA-Z][-a-zA-Z0-9]*$"
+    Default: 'network-stack'
+
+  DBInstanceAvailabilityZone:
+    Description: Availability zone for RDS
+    Type: String
+    Default: 'us-west-2b'
+
+  DBInstanceClass:
+    Description: RDS instance type
+    Type: String
+    Default: db.t2.micro
+    AllowedValues: [db.t2.micro, db.t2.small, db.t2.medium, db.t2.large, db.t2.xlarge, db.t2.2xlarge]
+    ConstraintDescription: Enter a vaild RDS instance type.
+
+  AllocatedStorage:
+    Description: AllocatedStorage for RDS instance in GB
+    Type: String
+    Default: '10'
+
+  DBName:
+    Description: Default Database name
+    Type: String
+    Default: 'devdb'
+
+  DBMasterUsername:
+    Description: Database Master Username
+    Type: String
+    Default: 'regdevelop'
+
+  DBMasterUserPassword:
+    Description: Database Master User Password
+    Type: String
+    Default: 'regdevelop'
+
+  DBPort:
+    Description: Database Port
+    Type: String
+    Default: '5432'
+
+  RDSBackupRetentionPeriod:
+    Description: RDS Backup Retention Period
+    Type: String
+    Default: '30'
+
+Resources:
+  RDSInstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join [ "-", [ !Sub '${AWS::StackName}', rdsinstance ] ]
+      GroupDescription: Security Group for rds instance
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${ParentNetworkStack}-VPC1"
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Sub '${AWS::StackName}', 'VPC1', 'rdsinstance' ] ]
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: !Ref DBPort
+        ToPort: !Ref DBPort
+        Description: Postgres Service
+        CidrIp:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC1CidrBlock"
+      - IpProtocol: tcp
+        FromPort: 5432
+        ToPort: 5432
+        Description: Postgres Service
+        CidrIp:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC2CidrBlock"
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        CidrIp: 0.0.0.0/0
+        FromPort: 0
+        ToPort: 65535
+        Description: Open to an external network
+
+  RDSSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupDescription: 'Subnet Group for RDS instance'
+      DBSubnetGroupName: !Join [ "-", [ !Sub '${AWS::StackName}','VPC1', 'SubnetGroup' ] ]
+      SubnetIds:
+        - Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC1PrivateSubnet1"
+        - Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC1PrivateSubnet2"
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Sub '${AWS::StackName}', 'VPC1', 'SubnetGroup' ] ]
+
+  RDSParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: 'Parameter Group for RDS instance'
+      Family: 'postgres9.6'
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Sub '${AWS::StackName}', 'VPC1', 'ParameterGroup' ] ]
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref AllocatedStorage
+      StorageType: 'standard'
+      Engine: 'postgres'
+      EngineVersion: '9.6.9'
+      AllowMajorVersionUpgrade: 'true'
+      AutoMinorVersionUpgrade: 'true'
+      AvailabilityZone: !Ref DBInstanceAvailabilityZone
+      MultiAZ: 'false'
+      PubliclyAccessible: 'false'
+      DBName: !Ref DBName
+      MasterUsername: !Ref DBMasterUsername
+      MasterUserPassword: !Ref DBMasterUserPassword
+      Port: !Ref DBPort
+      BackupRetentionPeriod: !Ref RDSBackupRetentionPeriod
+      CopyTagsToSnapshot: 'true'
+      DBParameterGroupName: !Ref RDSParameterGroup
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      VPCSecurityGroups:
+        - !Ref RDSInstanceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Sub '${AWS::StackName}', 'VPC1', 'DBInstance' ] ]
+
+Outputs:
+  RDSEndpoint:
+    Description: RDS Instance Endpoint Address
+    Value: !GetAtt [RDSInstance, Endpoint.Address]
+    Export:
+      Name: !Join [ "-", [ !Sub '${AWS::StackName}', RDSEndpointAddress ]]
+
+  RDSPort:
+    Description: RDS port
+    Value: !GetAtt [RDSInstance, Endpoint.Port]
+    Export:
+      Name: !Join [ "-", [ !Sub '${AWS::StackName}', RDSEndpointPort ] ]
+
+  DBMasterUser:
+    Description: RDS instance master user
+    Value: !Ref DBMasterUsername
+    Export:
+      Name: !Join [ "-", [ !Sub '${AWS::StackName}', DBMasterUserName ] ]
+
+  DBMasterUserPass:
+    Description: RDS instance master user password
+    Value: !Ref DBMasterUserPassword
+    Export:
+      Name: !Join [ "-", [ !Sub '${AWS::StackName}', DBMasterUserPass ] ]
+
+  DefaultDBName:
+    Description: Default RDS Database Instance Name
+    Value: !Ref DBName
+    Export:
+      Name: !Join [ "-", [ !Sub '${AWS::StackName}', DefaultDBName ] ]

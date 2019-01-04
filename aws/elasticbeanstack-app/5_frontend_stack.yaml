@@ -1,0 +1,233 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'Cloudformation template to create a frontend environment in elasticbeanstack'
+
+Parameters:
+  ParentNetworkStack:
+    Description: Name of the parent network stack
+    Type: String
+    MinLength: 1
+    MaxLength: 255
+    AllowedPattern: "^[a-zA-Z][-a-zA-Z0-9]*$"
+    Default: 'network-stack'
+
+  ParentDatabaseStack:
+    Description: Name of the parent database stack
+    Type: String
+    MinLength: 1
+    MaxLength: 255
+    AllowedPattern: "^[a-zA-Z][-a-zA-Z0-9]*$"
+    Default: 'database-stack'
+
+  ParentElasticBeanStack:
+    Description: Name of the parent elasticbeanstack
+    Type: String
+    MinLength: 1
+    MaxLength: 255
+    AllowedPattern: "^[a-zA-Z][-a-zA-Z0-9]*$"
+    Default: 'elasticbean-stack'
+
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to elasticbeanstack instances
+    Type: String
+    Default: key
+
+  SSLCertificateArns:
+    Description: SSL Certificate Arn
+    Type: String
+    Default: 'SSLCertificateArns'
+
+  RegistrarUIInstanceType:
+    Description: Beanstack EC2 instance type
+    Type: String
+    Default: t2.medium
+    AllowedValues: [t1.micro, t2.nano, t2.micro, t2.small, t2.medium, m3.medium]
+    ConstraintDescription: Enter a vaild Beanstack EC2 instance type.
+
+  SolutionStackName:
+    Description: Solution Stack Name
+    Type: String
+    Default: '64bit Amazon Linux 2018.03 v4.5.4 running Node.js'
+
+Resources:
+  RegistrarUISecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join [ "-", [ !Sub '${AWS::StackName}', registrar-ui-securitygroup ] ]
+      GroupDescription: Security Group for lb2
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${ParentNetworkStack}-VPC1"
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Sub '${AWS::StackName}', 'VPC1', 'registrar-ui' ] ]
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+        Description: Open to vpc1
+        CidrIp:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC1CidrBlock"
+      - IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+        Description: Open to vpc2
+        CidrIp:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC2CidrBlock"
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        CidrIp: 0.0.0.0/0
+        FromPort: 0
+        ToPort: 65535
+        Description: Open to an external network
+
+  RegistrarUIConfigurationTemplate:
+    Type: AWS::ElasticBeanstalk::ConfigurationTemplate
+    Properties:
+      ApplicationName:
+        Fn::ImportValue:
+          !Sub "${ParentElasticBeanStack}-Application"
+      Description: Configuration template for RegistrarUI
+      OptionSettings:
+      - Namespace: aws:ec2:vpc
+        OptionName: VPCId
+        Value:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC1"
+      - Namespace: aws:ec2:vpc
+        OptionName: Subnets
+        Value:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC1PrivateSubnet1"
+      - Namespace: aws:ec2:vpc
+        OptionName: ELBSubnets
+        Value: !Join [ ",", [ { "Fn::ImportValue" : {"Fn::Sub": "${ParentNetworkStack}-VPC1PublicSubnet1" } } , { "Fn::ImportValue" : {"Fn::Sub": "${ParentNetworkStack}-VPC1PublicSubnet2" } } ] ]
+      - Namespace: aws:autoscaling:launchconfiguration
+        OptionName: EC2KeyName
+        Value: !Ref KeyName
+      - Namespace: aws:autoscaling:launchconfiguration
+        OptionName: SecurityGroups
+        Value: !Ref RegistrarUISecurityGroup
+      - Namespace: aws:autoscaling:launchconfiguration
+        OptionName: InstanceType
+        Value: !Ref RegistrarUIInstanceType
+      - Namespace: aws:autoscaling:launchconfiguration
+        OptionName: RootVolumeSize
+        Value: '20'
+      - Namespace: aws:autoscaling:asg
+        OptionName: MinSize
+        Value: '1'
+      - Namespace: aws:autoscaling:asg
+        OptionName: MaxSize
+        Value: '2'
+      - Namespace: aws:elasticbeanstalk:environment
+        OptionName: EnvironmentType
+        Value: 'LoadBalanced'
+      - Namespace: aws:elasticbeanstalk:environment
+        OptionName: LoadBalancerType
+        Value: 'application'
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: ManagedSecurityGroup
+        Value: !Ref RegistrarUISecurityGroup
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: SecurityGroups
+        Value: !Ref RegistrarUISecurityGroup
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: AccessLogsS3Bucket
+        Value: { "Fn::ImportValue" : {"Fn::Sub": "${ParentElasticBeanStack}-ELBAccessLogsS3Bucket" } }
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: AccessLogsS3Enabled
+        Value: 'true'
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: AccessLogsS3Prefix
+        Value: 'RegistrarUI'
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: IdleTimeout
+        Value: '300'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: DeregistrationDelay
+        Value: '60'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: HealthCheckInterval
+        Value: '20'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: HealthCheckPath
+        Value: '/'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: HealthCheckTimeout
+        Value: '5'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: HealthyThresholdCount
+        Value: '2'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: UnhealthyThresholdCount
+        Value: '3'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: MatcherHTTPCode
+        Value: '200'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: Port
+        Value: '8081'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: Protocol
+        Value: 'HTTP'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: StickinessEnabled
+        Value: 'true'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: StickinessLBCookieDuration
+        Value: '300'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: StickinessType
+        Value: 'lb_cookie'
+      - Namespace: aws:elbv2:listener:default
+        OptionName: ListenerEnabled
+        Value: 'true'
+#      - Namespace: aws:elbv2:listener:443
+#        OptionName: DefaultProcess
+#        Value: default
+#      - Namespace: aws:elbv2:listener:443
+#        OptionName: ListenerEnabled
+#        Value: 'true'
+#      - Namespace: aws:elbv2:listener:443
+#        OptionName: SSLCertificateArns
+#        Value: !Ref SSLCertificateArns
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: ANGULAR_PRODUCTION
+        Value: 'true'
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: ETHERSCAN_HOST
+        Value: etherscan.io
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: REGISTRAR_URL
+        Value: !Join [ " ", [ 'https://', { "Fn::ImportValue" : {"Fn::Sub": "${ParentElasticBeanStack}-RegistrarEndpointURL" } } ]]
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: RVT_CONTRACT_ADDR
+        Value: '0x3d1BA9be9f66B8ee101911bC36D3fB562eaC2244'
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: REG_CONTRACT_ADDR
+        Value: '0xbfe5385a506e65f12926eff9b1f98dde2a570201'
+      SolutionStackName: !Ref SolutionStackName
+
+  RegistrarUIEnvironment:
+    Type: AWS::ElasticBeanstalk::Environment
+    Properties:
+      Description: Registrar UI Environment
+      ApplicationName:
+        Fn::ImportValue:
+          !Sub "${ParentElasticBeanStack}-Application"
+      TemplateName: !Ref RegistrarUIConfigurationTemplate
+      EnvironmentName: !Join [ "-", [ !Sub '${AWS::StackName}', RegistrarUI ] ]
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Sub '${AWS::StackName}', RegistrarUI ] ]
+
+Outputs:
+  RegistrarUIEndpoint:
+    Description: Registrar UI Endpoint
+    Value: !GetAtt [ RegistrarUIEnvironment, EndpointURL ]
+    Export:
+      Name: !Join [ "-", [ !Sub '${AWS::StackName}', RegistrarUIEndpoint ]]

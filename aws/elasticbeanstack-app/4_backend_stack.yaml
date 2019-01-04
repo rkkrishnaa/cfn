@@ -1,0 +1,539 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'Cloudformation template to create an application, environment for each microservices in elasticbeanstack'
+
+Parameters:
+  ParentNetworkStack:
+    Description: Name of the parent network stack
+    Type: String
+    MinLength: 1
+    MaxLength: 255
+    AllowedPattern: "^[a-zA-Z][-a-zA-Z0-9]*$"
+    Default: 'network-stack'
+
+  ParentDatabaseStack:
+    Description: Name of the parent database stack
+    Type: String
+    MinLength: 1
+    MaxLength: 255
+    AllowedPattern: "^[a-zA-Z][-a-zA-Z0-9]*$"
+    Default: 'database-stack'
+
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to elasticbeanstack instances
+    Type: String
+    Default: key
+
+  BeanstackInstanceType:
+    Description: Beanstack EC2 instance type
+    Type: String
+    Default: t2.medium
+    AllowedValues: [t1.micro, t2.nano, t2.micro, t2.small, t2.medium, m3.medium]
+    ConstraintDescription: Enter a vaild Beanstack EC2 instance type.
+
+  SolutionStackName:
+    Description: Solution Stack Name
+    Type: String
+    Default: '64bit Amazon Linux 2018.03 v2.7.4 running Java 8'
+
+  SSLCertificateArns:
+    Description: SSL Certificate Arn
+    Type: String
+    Default: 'SSLCertificateArns'
+
+  AccessLogsS3Bucket:
+    Description: Access Log S3 Bucket Name
+    Type: String
+    Default: 'alb-access-log-s3-bucket'
+
+Resources:
+#s3
+  ELBLogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      PolicyDocument:
+        Id: !Join [ "-", [ !Sub '${AWS::StackName}', ELBLogsBucketPolicy ] ]
+        Version: 2012-10-17
+        Statement:
+          - Sid: LoadbalancerlogAccess
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:*'
+            Resource: !Join
+              - ''
+              - - 'arn:aws:s3:::'
+                - !Ref AccessLogsS3Bucket
+                - /*
+      Bucket: !Ref AccessLogsS3Bucket
+
+  #elasticbeanstack
+  BeanstalkSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join [ "-", [ !Sub '${AWS::StackName}', beanstacksecuritygroup ] ]
+      GroupDescription: Security Group for elasticbeanstack instance
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${ParentNetworkStack}-VPC1"
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Sub '${AWS::StackName}', 'VPC1', 'beanstackinstance' ] ]
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+        Description: Open to vpc1
+        CidrIp:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC1CidrBlock"
+      - IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+        Description: Open to vpc2
+        CidrIp:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC2CidrBlock"
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        CidrIp: 0.0.0.0/0
+        FromPort: 0
+        ToPort: 65535
+        Description: Open to an external network
+
+  LB1SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join [ "-", [ !Sub '${AWS::StackName}', registrar-loadbalancer-securitygroup ] ]
+      GroupDescription: Security Group for registrar load balancer
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${ParentNetworkStack}-VPC1"
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Sub '${AWS::StackName}', 'VPC1', 'Registrar-Loadbalancer' ] ]
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+        Description: Open to vpc1
+        CidrIp:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC1CidrBlock"
+      - IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+        Description: Open to vpc2
+        CidrIp:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC2CidrBlock"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        CidrIp: 0.0.0.0/0
+        FromPort: 443
+        ToPort: 443
+        Description: HTTPS service port opened to an external network
+      - IpProtocol: tcp
+        CidrIp: 0.0.0.0/0
+        FromPort: 80
+        ToPort: 80
+        Description: HTTP service port opened to an external network
+  LB2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join [ "-", [ !Sub '${AWS::StackName}', confirm-loadbalancer-securitygroup ] ]
+      GroupDescription: Security Group for confirm load balancer
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${ParentNetworkStack}-VPC1"
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Sub '${AWS::StackName}', 'VPC1', 'Confirm-Loadbalancer' ] ]
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+        Description: Open to vpc1
+        CidrIp:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC1CidrBlock"
+      - IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+        Description: Open to vpc2
+        CidrIp:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC2CidrBlock"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        CidrIp: 0.0.0.0/0
+        FromPort: 443
+        ToPort: 443
+        Description: HTTPS service port opened to an external network
+      - IpProtocol: tcp
+        CidrIp: 0.0.0.0/0
+        FromPort: 80
+        ToPort: 80
+        Description: HTTP service port opened to an external network
+  Application:
+    Type: AWS::ElasticBeanstalk::Application
+    Properties:
+      ApplicationName: !Join [ "-", [ !Sub '${AWS::StackName}', app ] ]
+      Description: Java8 application
+
+  RegistrarConfigurationTemplate:
+    Type: AWS::ElasticBeanstalk::ConfigurationTemplate
+    Properties:
+      ApplicationName: !Ref Application
+      Description: Configuration template for Registrar service
+      OptionSettings:
+      - Namespace: aws:ec2:vpc
+        OptionName: VPCId
+        Value:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC1"
+      - Namespace: aws:ec2:vpc
+        OptionName: Subnets
+        Value:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC1PrivateSubnet1"
+      - Namespace: aws:ec2:vpc
+        OptionName: ELBSubnets
+        Value: !Join [ ",", [ { "Fn::ImportValue" : {"Fn::Sub": "${ParentNetworkStack}-VPC1PublicSubnet1" } } , { "Fn::ImportValue" : {"Fn::Sub": "${ParentNetworkStack}-VPC1PublicSubnet2" } } ] ]
+      - Namespace: aws:autoscaling:launchconfiguration
+        OptionName: EC2KeyName
+        Value: !Ref KeyName
+      - Namespace: aws:autoscaling:launchconfiguration
+        OptionName: SecurityGroups
+        Value: !Ref BeanstalkSecurityGroup
+      - Namespace: aws:autoscaling:launchconfiguration
+        OptionName: InstanceType
+        Value: !Ref BeanstackInstanceType
+      - Namespace: aws:autoscaling:launchconfiguration
+        OptionName: RootVolumeSize
+        Value: '20'
+      - Namespace: aws:autoscaling:asg
+        OptionName: MinSize
+        Value: '1'
+      - Namespace: aws:autoscaling:asg
+        OptionName: MaxSize
+        Value: '2'
+      - Namespace: aws:elasticbeanstalk:environment
+        OptionName: EnvironmentType
+        Value: LoadBalanced
+      - Namespace: aws:elasticbeanstalk:environment
+        OptionName: LoadBalancerType
+        Value: application
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: ManagedSecurityGroup
+        Value: !Ref LB1SecurityGroup
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: SecurityGroups
+        Value: !Ref LB1SecurityGroup
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: AccessLogsS3Bucket
+        Value: !Ref AccessLogsS3Bucket
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: AccessLogsS3Enabled
+        Value: 'true'
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: AccessLogsS3Prefix
+        Value: 'Registrar'
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: IdleTimeout
+        Value: '300'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: DeregistrationDelay
+        Value: '60'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: HealthCheckInterval
+        Value: '20'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: HealthCheckPath
+        Value: '/'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: HealthCheckTimeout
+        Value: '5'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: HealthyThresholdCount
+        Value: '2'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: UnhealthyThresholdCount
+        Value: '3'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: MatcherHTTPCode
+        Value: '200'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: Port
+        Value: '5000'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: Protocol
+        Value: 'HTTP'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: StickinessEnabled
+        Value: 'true'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: StickinessLBCookieDuration
+        Value: '300'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: StickinessType
+        Value: 'lb_cookie'
+      - Namespace: aws:elbv2:listener:default
+        OptionName: ListenerEnabled
+        Value: 'true'
+#      - Namespace: aws:elbv2:listener:443
+#        OptionName: DefaultProcess
+#        Value: default
+#      - Namespace: aws:elbv2:listener:443
+#        OptionName: ListenerEnabled
+#        Value: 'true'
+#      - Namespace: aws:elbv2:listener:443
+#        OptionName: SSLCertificateArns
+#        Value: !Ref SSLCertificateArns
+#       - Namespace: aws:elbv2:listener:443
+#         OptionName: Protocol
+#         Value: HTTPS
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: GRADLE_HOME
+        Value: '/usr/local/gradle'
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: GRAILS_ENV
+        Value: 'production'
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: JAVA_HOME
+        Value: '/usr/lib/jvm/java'
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: M2
+        Value: '/usr/local/apache-maven/bin'
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: M2_HOME
+        Value: '/usr/local/apache-maven'
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: RDS_DB_NAME
+        Value: 'ebdb'
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: RDS_HOSTNAME
+        Value:
+          Fn::ImportValue:
+            !Sub "${ParentDatabaseStack}-RDSEndpointAddress"
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: RDS_PORT
+        Value:
+          Fn::ImportValue:
+            !Sub "${ParentDatabaseStack}-RDSEndpointPort"
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: RDS_USERNAME
+        Value:
+          Fn::ImportValue:
+            !Sub "${ParentDatabaseStack}-DBMasterUserName"
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: RDS_PASSWORD
+        Value:
+          Fn::ImportValue:
+            !Sub "${ParentDatabaseStack}-DBMasterUserPass"
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: SERVER_PORT
+        Value: '5000'
+      SolutionStackName: !Ref SolutionStackName
+
+  ConfirmerConfigurationTemplate:
+    Type: AWS::ElasticBeanstalk::ConfigurationTemplate
+    Properties:
+      ApplicationName: !Ref Application
+      Description: Configuration template for Confirmer service
+      OptionSettings:
+      - Namespace: aws:ec2:vpc
+        OptionName: VPCId
+        Value:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC1"
+      - Namespace: aws:ec2:vpc
+        OptionName: Subnets
+        Value:
+          Fn::ImportValue:
+            !Sub "${ParentNetworkStack}-VPC1PrivateSubnet1"
+      - Namespace: aws:ec2:vpc
+        OptionName: ELBSubnets
+        Value: !Join [ ",", [ { "Fn::ImportValue" : {"Fn::Sub": "${ParentNetworkStack}-VPC1PublicSubnet1" } } , { "Fn::ImportValue" : {"Fn::Sub": "${ParentNetworkStack}-VPC1PublicSubnet2" } } ] ]
+      - Namespace: aws:autoscaling:launchconfiguration
+        OptionName: EC2KeyName
+        Value: !Ref KeyName
+      - Namespace: aws:autoscaling:launchconfiguration
+        OptionName: SecurityGroups
+        Value: !Ref BeanstalkSecurityGroup
+      - Namespace: aws:autoscaling:launchconfiguration
+        OptionName: InstanceType
+        Value: !Ref BeanstackInstanceType
+      - Namespace: aws:autoscaling:launchconfiguration
+        OptionName: RootVolumeSize
+        Value: '20'
+      - Namespace: aws:autoscaling:asg
+        OptionName: MinSize
+        Value: '1'
+      - Namespace: aws:autoscaling:asg
+        OptionName: MaxSize
+        Value: '2'
+      - Namespace: aws:elasticbeanstalk:environment
+        OptionName: EnvironmentType
+        Value: 'LoadBalanced'
+      - Namespace: aws:elasticbeanstalk:environment
+        OptionName: LoadBalancerType
+        Value: 'application'
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: ManagedSecurityGroup
+        Value: !Ref LB2SecurityGroup
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: SecurityGroups
+        Value: !Ref LB2SecurityGroup
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: AccessLogsS3Bucket
+        Value: !Ref AccessLogsS3Bucket
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: AccessLogsS3Enabled
+        Value: 'true'
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: AccessLogsS3Prefix
+        Value: 'Confirm'
+      - Namespace: aws:elbv2:loadbalancer
+        OptionName: IdleTimeout
+        Value: '300'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: DeregistrationDelay
+        Value: '60'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: HealthCheckInterval
+        Value: '20'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: HealthCheckPath
+        Value: '/'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: HealthCheckTimeout
+        Value: '5'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: HealthyThresholdCount
+        Value: '2'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: UnhealthyThresholdCount
+        Value: '3'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: MatcherHTTPCode
+        Value: '200'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: Port
+        Value: '5000'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: Protocol
+        Value: HTTP
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: StickinessEnabled
+        Value: 'true'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: StickinessLBCookieDuration
+        Value: '300'
+      - Namespace: aws:elasticbeanstalk:environment:process:default
+        OptionName: StickinessType
+        Value: 'lb_cookie'
+      - Namespace: aws:elbv2:listener:default
+        OptionName: ListenerEnabled
+        Value: 'true'
+#      - Namespace: aws:elbv2:listener:443
+#        OptionName: DefaultProcess
+#        Value: default
+#      - Namespace: aws:elbv2:listener:443
+#        OptionName: ListenerEnabled
+#        Value: 'true'
+#      - Namespace: aws:elbv2:listener:443
+#        OptionName: SSLCertificateArns
+#        Value: !Ref SSLCertificateArns
+#       - Namespace: aws:elbv2:listener:443
+#         OptionName: Protocol
+#         Value: HTTPS
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: GRADLE_HOME
+        Value: '/usr/local/gradle'
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: GRAILS_ENV
+        Value: 'production'
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: JAVA_HOME
+        Value: '/usr/lib/jvm/java'
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: M2
+        Value: '/usr/local/apache-maven/bin'
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: M2_HOME
+        Value: '/usr/local/apache-maven'
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: RDS_DB_NAME
+        Value: 'confirm'
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: RDS_HOSTNAME
+        Value:
+          Fn::ImportValue:
+            !Sub "${ParentDatabaseStack}-RDSEndpointAddress"
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: RDS_PORT
+        Value:
+          Fn::ImportValue:
+            !Sub "${ParentDatabaseStack}-RDSEndpointPort"
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: RDS_USERNAME
+        Value:
+          Fn::ImportValue:
+            !Sub "${ParentDatabaseStack}-DBMasterUserName"
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: RDS_PASSWORD
+        Value:
+          Fn::ImportValue:
+            !Sub "${ParentDatabaseStack}-DBMasterUserPass"
+      - Namespace: aws:elasticbeanstalk:application:environment
+        OptionName: SERVER_PORT
+        Value: '5000'
+      SolutionStackName: !Ref SolutionStackName
+
+  RegistrarEnvironment:
+    Type: AWS::ElasticBeanstalk::Environment
+    Properties:
+      Description: Registrar Environment
+      ApplicationName: !Ref Application
+      TemplateName: !Ref RegistrarConfigurationTemplate
+      EnvironmentName: !Join [ "-", [ !Sub '${AWS::StackName}', Registrar ] ]
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Sub '${AWS::StackName}', Registrar ] ]
+
+  ConfirmerEnvironment:
+    Type: AWS::ElasticBeanstalk::Environment
+    Properties:
+      Description: Confirmer Environment
+      ApplicationName: !Ref Application
+      TemplateName: !Ref ConfirmerConfigurationTemplate
+      EnvironmentName: !Join [ "-", [ !Sub '${AWS::StackName}', Confirmer ] ]
+      Tags:
+        - Key: Name
+          Value: !Join [ "-", [ !Sub '${AWS::StackName}', Confirmer ] ]
+
+Outputs:
+  ElasticBeanstackApplication:
+    Description: Elastic Beanstack Application
+    Value: !Ref Application
+    Export:
+      Name: !Join [ "-", [ !Sub '${AWS::StackName}', Application ]]
+
+  RegistrarEndpointURL:
+    Description: Registrar Endpoint URL
+    Value: !GetAtt [ RegistrarEnvironment, EndpointURL ]
+    Export:
+      Name: !Join [ "-", [ !Sub '${AWS::StackName}', RegistrarEndpointURL ]]
+
+  ConfirmerEndpointURL:
+    Description: Confirmer Endpoint URL
+    Value: !GetAtt [ ConfirmerEnvironment, EndpointURL ]
+    Export:
+      Name: !Join [ "-", [ !Sub '${AWS::StackName}', ConfirmerEndpointURL ]]
+
+  ELBAccessLogsS3Bucket:
+    Description: Access Logs S3 Bucket
+    Value: !Ref AccessLogsS3Bucket
+    Export:
+      Name: !Join [ "-", [ !Sub '${AWS::StackName}', ELBAccessLogsS3Bucket ]]
